@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Gaming Cafe — Live QR Menu</title>
+  <style>
+    * { box-sizing: border-box; font-family: system-ui, -apple-system, sans-serif; }
+    body { margin: 0; background: #0f1117; color: #f3f4f6; padding: 16px; max-width: 520px; margin-inline: auto; }
+    h1 { font-size: 22px; margin: 0 0 4px; color: #a78bfa; }
+    p.sub { font-size: 13px; color: #9ca3af; margin: 0 0 18px; }
+    .card { background: #1a1d27; border: 1px solid #2d3142; border-radius: 12px; padding: 14px; margin-bottom: 12px; }
+    .item-row { display: flex; justify-content: space-between; align-items: center; padding: 10px 0; border-bottom: 1px solid #262a38; }
+    .item-row:last-child { border-bottom: none; }
+    .item-name { font-weight: 600; font-size: 15px; }
+    .item-price { font-size: 13px; color: #a78bfa; }
+    .qty-controls { display: flex; align-items: center; gap: 10px; }
+    .qty-btn { width: 30px; height: 30px; border-radius: 8px; border: none; background: #2d3142; color: #fff; font-size: 18px; cursor: pointer; }
+    .qty-btn:active { background: #7c3aed; }
+    select, input { width: 100%; padding: 11px; border-radius: 8px; border: 1px solid #2d3142; background: #12141c; color: #fff; font-size: 15px; margin-top: 6px; }
+    .submit-btn { width: 100%; padding: 14px; border: none; border-radius: 10px; background: #7c3aed; color: #fff; font-size: 16px; font-weight: 700; cursor: pointer; margin-top: 12px; }
+    .submit-btn:disabled { background: #4b5563; cursor: not-allowed; }
+    
+    /* Live Tracker Box */
+    #trackerBox { display: none; text-align: center; border: 2px solid #7c3aed; background: #161925; }
+    .code-display { font-size: 42px; font-weight: 800; letter-spacing: 6px; color: #c4b5fd; margin: 8px 0; }
+    .steps { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin-top: 14px; }
+    .step { padding: 8px 4px; border-radius: 8px; font-size: 11px; font-weight: 700; background: #232736; color: #6b7280; }
+    .step.active { background: #7c3aed; color: #fff; }
+    .step.done { background: #10b981; color: #06281e; }
+    #statusMessage { margin-top: 14px; padding: 10px; border-radius: 8px; font-weight: 600; font-size: 14px; background: #2d2614; color: #fbbf24; }
+  </style>
+</head>
+<body>
+
+  <h1>🎮 Cafe Live Menu</h1>
+  <p class="sub">Select your items & station, then show your 4-digit code at the counter.</p>
+
+  <!-- ORDER FORM SECTION -->
+  <div id="orderSection">
+    <div class="card">
+      <label style="font-size:13px; color:#9ca3af;">Select Your PC / Console Station</label>
+      <select id="stationSelect">
+        <option value="PC-01">PC-01</option>
+        <option value="PC-02">PC-02</option>
+        <option value="PC-03">PC-03</option>
+        <option value="PC-04">PC-04</option>
+        <option value="PS5-1">PS5-1</option>
+        <option value="PS5-2">PS5-2</option>
+      </select>
+    </div>
+
+    <div class="card" id="menuContainer"></div>
+
+    <div class="card">
+      <div style="display:flex; justify-content:space-between; font-size:17px; font-weight:700;">
+        <span>Total Amount</span>
+        <span id="totalDisplay">₹0</span>
+      </div>
+      <button id="placeOrderBtn" class="submit-btn" onclick="submitOrder()">Place Order</button>
+    </div>
+  </div>
+
+  <!-- LIVE 4-STAGE TRACKER SECTION -->
+  <div class="card" id="trackerBox">
+    <p style="margin:0; font-size:13px; color:#9ca3af;">Show this code at the counter within 10 mins:</p>
+    <div class="code-display" id="displayCode">#0000</div>
+    <p id="orderSummaryText" style="font-size:12px; color:#9ca3af; margin:0 0 10px;"></p>
+
+    <div class="steps">
+      <div class="step active" id="st-Pending">1. Pending</div>
+      <div class="step" id="st-Confirmed">2. Confirmed</div>
+      <div class="step" id="st-Preparing">3. Preparing</div>
+      <div class="step" id="st-Done">4. Done</div>
+    </div>
+
+    <div id="statusMessage">⏳ Waiting for counter verification...</div>
+  </div>
+
+  <script>
+    // ==========================================
+    // 1. PASTE YOUR TWO LINKS BELOW
+    // ==========================================
+    const MAKE_WEBHOOK_URL = "PASTE_YOUR_MAKE_WEBHOOK_URL_HERE";
+    const LIVE_STATUS_CSV_URL = "PASTE_YOUR_LIVE_ORDERS_CSV_URL_HERE";
+
+    // ==========================================
+    // 2. EDIT YOUR CAFE MENU ITEMS HERE
+    // ==========================================
+    const MENU_ITEMS = [
+      { id: 1, name: "Cold Coffee", price: 110 },
+      { id: 2, name: "Peri Peri Fries", price: 100 },
+      { id: 3, name: "Loaded Nachos", price: 150 },
+      { id: 4, name: "Red Bull", price: 150 },
+      { id: 5, name: "Veg Grill Sandwich", price: 120 },
+      { id: 6, name: "Maggi Masala", price: 70 }
+    ];
+
+    const cart = {};
+
+    function renderMenu() {
+      const container = document.getElementById("menuContainer");
+      container.innerHTML = MENU_ITEMS.map(item => `
+        <div class="item-row">
+          <div>
+            <div class="item-name">${item.name}</div>
+            <div class="item-price">₹${item.price}</div>
+          </div>
+          <div class="qty-controls">
+            <button class="qty-btn" onclick="updateQty(${item.id}, -1)">−</button>
+            <span id="qty-${item.id}" style="min-width:18px; text-align:center;">0</span>
+            <button class="qty-btn" onclick="updateQty(${item.id}, 1)">+</button>
+          </div>
+        </div>
+      `).join("");
+    }
+
+    function updateQty(id, delta) {
+      cart[id] = Math.max(0, (cart[id] || 0) + delta);
+      document.getElementById(`qty-${id}`).innerText = cart[id];
+      calculateTotal();
+    }
+
+    function calculateTotal() {
+      let total = 0;
+      MENU_ITEMS.forEach(item => {
+        total += (cart[item.id] || 0) * item.price;
+      });
+      document.getElementById("totalDisplay").innerText = "₹" + total;
+      return total;
+    }
+
+    async function submitOrder() {
+      const total = calculateTotal();
+      if (total === 0) {
+        alert("Please add at least one item!");
+        return;
+      }
+
+      const btn = document.getElementById("placeOrderBtn");
+      btn.disabled = true;
+      btn.innerText = "Sending Order...";
+
+      // Generate unique 4-digit Order Code
+      const orderCode = String(Math.floor(1000 + Math.random() * 9000));
+      const table = document.getElementById("stationSelect").value;
+      const summaryParts = [];
+      MENU_ITEMS.forEach(item => {
+        if (cart[item.id] > 0) summaryParts.push(`${item.name} x${cart[item.id]}`);
+      });
+      const orderSummary = summaryParts.join(", ");
+
+      const payload = {
+        timestamp: new Date().toISOString(),
+        order_code: orderCode,
+        table: table,
+        order_summary: orderSummary,
+        total: total
+      };
+
+      try {
+        await fetch(MAKE_WEBHOOK_URL, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload)
+        });
+
+        // Switch to Live Tracker view
+        document.getElementById("orderSection").style.display = "none";
+        document.getElementById("trackerBox").style.display = "block";
+        document.getElementById("displayCode").innerText = "#" + orderCode;
+        document.getElementById("orderSummaryText").innerText = `${table} • ${orderSummary} (₹${total})`;
+
+        startLiveTracking(orderCode);
+      } catch (err) {
+        alert("Network error! Please try again.");
+        btn.disabled = false;
+        btn.innerText = "Place Order";
+      }
+    }
+
+    // Properly parse CSV rows even when items contain commas
+    function parseCSVLine(line) {
+      const result = [];
+      let current = "";
+      let inQuotes = false;
+      for (let i = 0; i < line.length; i++) {
+        const ch = line[i];
+        if (ch === '"') inQuotes = !inQuotes;
+        else if (ch === ',' && !inQuotes) { result.push(current.trim()); current = ""; }
+        else current += ch;
+      }
+      result.push(current.trim());
+      return result;
+    }
+
+    function startLiveTracking(orderCode) {
+      const stages = ["Pending", "Confirmed", "Preparing", "Done"];
+
+      const poller = setInterval(async () => {
+        try {
+          const separator = LIVE_STATUS_CSV_URL.includes("?") ? "&" : "?";
+          const res = await fetch(LIVE_STATUS_CSV_URL + separator + "t=" + Date.now());
+          const text = await res.text();
+          const lines = text.split(/\r?\n/).filter(l => l.trim() !== "");
+
+          // Find matching Order_Code in Column B (index 1)
+          let matchedRow = null;
+          for (let i = 1; i < lines.length; i++) {
+            const cols = parseCSVLine(lines[i]);
+            if (cols[1] === orderCode) {
+              matchedRow = cols;
+              break;
+            }
+          }
+
+          const msg = document.getElementById("statusMessage");
+
+          // If row was deleted by the 10-min auto-cleanup script
+          if (!matchedRow) {
+            msg.style.background = "#3b181d";
+            msg.style.color = "#f87171";
+            msg.innerText = "❌ Order expired (not verified within 10 mins).";
+            clearInterval(poller);
+            return;
+          }
+
+          // Column I (index 8) = Current_Status
+          const currentStatus = matchedRow[8] || "Pending";
+          const activeIndex = stages.indexOf(currentStatus);
+
+          stages.forEach((st, idx) => {
+            const el = document.getElementById("st-" + st);
+            el.className = "step";
+            if (idx < activeIndex) el.classList.add("done");
+            if (idx === activeIndex) el.classList.add(st === "Done" ? "done" : "active");
+          });
+
+          if (currentStatus === "Pending") {
+            msg.style.background = "#2d2614"; msg.style.color = "#fbbf24";
+            msg.innerText = "⏳ Show code #" + orderCode + " at the counter to confirm.";
+          } else if (currentStatus === "Confirmed") {
+            msg.style.background = "#172554"; msg.style.color = "#93c5fd";
+            msg.innerText = "✅ Confirmed! Sent to cafe kitchen.";
+          } else if (currentStatus === "Preparing") {
+            msg.style.background = "#431407"; msg.style.color = "#fdba74";
+            msg.innerText = "🍳 Preparing your order now...";
+          } else if (currentStatus === "Done") {
+            msg.style.background = "#064e3b"; msg.style.color = "#6ee7b7";
+            msg.innerText = "🎉 Order Ready! Enjoy your gaming session.";
+            clearInterval(poller);
+          }
+        } catch (e) {
+          console.log("Polling status...");
+        }
+      }, 5000);
+    }
+
+    renderMenu();
+  </script>
+</body>
+</html>
